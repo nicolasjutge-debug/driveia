@@ -857,12 +857,12 @@ async function doGen(){
   var prompt='Tu es moniteur auto-ecole expert AAC. Genere planning pour '+p.name+'.\n'
     +'Zone: '+zone+' | Objectif: '+goal+' | Jours: '+selDays.join(', ')+' | Duree: '+dur+'\n'
     +kmInfo+'Niveau debutant-intermediaire. Difficulte progressant dans la semaine.\n'
-    +'Reponds UNIQUEMENT en JSON valide:\n'
+    +'Reponds UNIQUEMENT en JSON valide, sans texte avant ni apres, sans balises markdown:\n'
     +'{"plan":[{"day":"Lundi","title":"Titre","distance":"X km","duration":"'+dur+'","difficulty":"Facile|Moyen|Difficile|Defi","focus":"Competence","icon":"emoji","description":"1 phrase"}]}';
   try{
     var res,data,text,parsed;
     if(DB.prov==='groq'){
-      res=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+DB.apiKey},body:JSON.stringify({model:'llama-3.3-70b-versatile',max_tokens:1200,messages:[{role:'user',content:prompt}]})});
+      res=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+DB.apiKey},body:JSON.stringify({model:'openai/gpt-oss-120b',max_completion_tokens:2000,reasoning_effort:'low',messages:[{role:'user',content:prompt}]})});
       data=await res.json();
       if(data.error)throw new Error(data.error.message||'Erreur Groq');
       text=(data.choices&&data.choices[0]&&data.choices[0].message&&data.choices[0].message.content)||'';
@@ -872,7 +872,13 @@ async function doGen(){
       if(data.error)throw new Error(data.error.message||'Erreur API');
       text=(data.content||[]).map(function(c){return c.text||'';}).join('');
     }
-    parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
+    var cleaned=text.replace(/```json|```/g,'').trim();
+    try{parsed=JSON.parse(cleaned);}catch(e2){
+      var m=cleaned.match(/\{[\s\S]*\}/);
+      if(!m)throw new Error('Reponse IA illisible');
+      parsed=JSON.parse(m[0]);
+    }
+    if(!parsed.plan||!parsed.plan.length)throw new Error('Reponse IA vide');
     p.plan=parsed.plan||[];
     gLoad=false;sDB();rG();toast('Plan genere !');
   }catch(e){gLoad=false;gErr='Erreur: '+e.message;rG();}
@@ -1065,7 +1071,7 @@ function rS(){
   h+='<div class="lbl">Fournisseur</div><div class="row" style="margin-bottom:14px"><button id="prov-groq" class="btn '+(DB.prov==='groq'?'by':'bs')+'" style="font-size:13px;padding:12px">Groq (gratuit)</button><button id="prov-ant" class="btn '+(DB.prov==='anthropic'?'by':'bs')+'" style="font-size:13px;padding:12px">Anthropic</button></div>';
   h+='<div class="lbl">Cle</div><div style="position:relative;margin-bottom:12px"><input type="password" id="api-key-input" value="'+(DB.apiKey||'')+'" placeholder="gsk_..." style="padding-right:50px"><button id="toggle-key-btn" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:18px">\uD83D\uDC41</button></div>';
   h+='<div class="row"><button class="btn by" id="save-key-btn">Enregistrer</button><button class="btn bs" id="test-key-btn">Tester</button></div><div id="key-status"></div>';
-  h+='<div style="background:rgba(76,175,80,.08);border:1px solid rgba(76,175,80,.2);border-radius:12px;padding:12px;margin-top:12px;font-size:12px;color:var(--mu);line-height:1.7"><strong style="color:#fff">Groq - gratuit</strong><br>1. console.groq.com - creer compte<br>2. API Keys - Create Key<br>3. Copier gsk_... et coller<br><strong style="color:var(--gn)">14400 requetes/jour</strong></div></div>';
+  h+='<div style="background:rgba(76,175,80,.08);border:1px solid rgba(76,175,80,.2);border-radius:12px;padding:12px;margin-top:12px;font-size:12px;color:var(--mu);line-height:1.7"><strong style="color:#fff">Groq - gratuit</strong><br>1. console.groq.com - creer compte<br>2. API Keys - Create Key<br>3. Copier gsk_... et coller<br><strong style="color:var(--gn)">1000 requetes/jour</strong></div></div>';
   h+='<div class="sc"><div style="font-size:11px;font-weight:700;color:var(--mu);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">\uD83D\uDD14 Rappels de saisie</div>';
   h+='<div style="font-size:12px;color:var(--mu);margin-bottom:14px;line-height:1.6">Active les notifications pour etre rappele si aucune lecon n\'a ete saisie depuis 2 jours ou plus (utile car Coach AAC enregistre la conduite, mais DriveAI doit etre nourri manuellement).</div>';
   var notifPerm=('Notification' in window)?Notification.permission:'unsupported';
@@ -1077,7 +1083,7 @@ function rS(){
   h+='<div class="sc"><div style="font-size:11px;font-weight:700;color:var(--rd);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px">Remise a zero</div>';
   h+='<div style="font-size:12px;color:var(--mu);margin-bottom:14px">RAZ progression d\'un conducteur ou toute l\'app.</div>';
   h+='<div class="row"><button class="btn bo" id="raz-prof-btn" style="font-size:13px;padding:12px">RAZ '+p.name+'</button><button class="btn br" id="raz-all-btn" style="font-size:13px;padding:12px">RAZ Tout</button></div></div>';
-  h+='<div style="text-align:center;padding:20px 0;font-size:11px;color:var(--dm)">DriveAI v4 - Groq Llama 3.3</div></div>';
+  h+='<div style="text-align:center;padding:20px 0;font-size:11px;color:var(--dm)">DriveAI v4 - Groq GPT-OSS 120B</div></div>';
   document.getElementById('ss').innerHTML=h;
   document.getElementById('prov-groq').onclick=function(){DB.prov='groq';sDB();rS();};
   document.getElementById('prov-ant').onclick=function(){DB.prov='anthropic';sDB();rS();};
@@ -1109,8 +1115,9 @@ async function testKeyFn(){
   try{
     var ok=false;
     if(DB.prov==='groq'){
-      var r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+DB.apiKey},body:JSON.stringify({model:'llama-3.3-70b-versatile',max_tokens:5,messages:[{role:'user',content:'OK'}]})});
+      var r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+DB.apiKey},body:JSON.stringify({model:'openai/gpt-oss-120b',max_completion_tokens:50,reasoning_effort:'low',messages:[{role:'user',content:'OK'}]})});
       var d=await r.json();ok=!!(d.choices&&d.choices[0]);
+      if(!ok&&d.error)throw new Error(d.error.message||'Cle invalide');
     }else{
       var r2=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':DB.apiKey,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:5,messages:[{role:'user',content:'OK'}]})});
       var d2=await r2.json();ok=!!(d2.content&&d2.content[0]);
