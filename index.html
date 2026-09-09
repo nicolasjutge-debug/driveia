@@ -126,7 +126,10 @@ function calcO(){
   else if(ks){ksa=Math.round(ks*0.6);}
   var dfe=null;
   if(ksa>0){var sn=Math.ceil(kr/ksa);dfe=new Date(today.getTime()+sn*7*86400000);}
-  return{kf:kf,ko:ko,kr:kr,pct:pct,but:but,jr:jr,sr:sr,ks:ks,kj:kj,ksa:ksa,retard:ks&&ks>120,urgent:jr&&jr<90,dfe:dfe};
+  // Cap intermediaire 1500 km (distinct de l'objectif final, evolue avec le rythme actuel)
+  var CAP=1500,capAtteint=kf>=CAP,kfCap=Math.max(0,CAP-kf),dCap=null;
+  if(!capAtteint&&ksa>0){var snCap=Math.ceil(kfCap/ksa);dCap=new Date(today.getTime()+snCap*7*86400000);}
+  return{kf:kf,ko:ko,kr:kr,pct:pct,but:but,jr:jr,sr:sr,ks:ks,kj:kj,ksa:ksa,retard:ks&&ks>120,urgent:jr&&jr<90,dfe:dfe,cap:CAP,capAtteint:capAtteint,kfCap:kfCap,dCap:dCap};
 }
 function fd(d){if(!d)return'--';return d.toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});}
 
@@ -419,6 +422,24 @@ function rO(){
   h+='<div style="font-size:32px;font-weight:900;color:'+urgC+'">'+o.kr.toLocaleString('fr')+' km</div>';
   h+='<div style="font-size:14px;color:var(--mu);margin-top:4px">restants sur '+o.ko.toLocaleString('fr')+' km</div>';
   if(o.but){h+='<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(156,39,176,.12);border:1px solid rgba(156,39,176,.3);border-radius:12px;padding:8px 16px;margin-top:12px">\uD83C\uDF82<span style="font-size:13px;font-weight:700;color:#fff">18 ans le '+fd(o.but)+'</span></div>';}
+  h+='</div>';
+  // Cap intermediaire 1500 km
+  h+='<div style="background:linear-gradient(135deg,#04262B,#031A1E);border:1px solid rgba(0,188,212,.4);border-radius:22px;padding:20px;margin-bottom:16px">';
+  h+='<div style="font-size:11px;font-weight:700;color:#4DD0E1;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:14px">\uD83D\uDCCD Cap interm\u00E9diaire \u2014 '+o.cap.toLocaleString('fr')+' km</div>';
+  if(o.capAtteint){
+    h+='<div style="display:flex;gap:12px;align-items:center;background:rgba(76,175,80,.1);border:1px solid rgba(76,175,80,.3);border-radius:14px;padding:14px">\u2705<div><div style="font-size:14px;font-weight:700;color:#fff">Cap d\u00E9j\u00E0 atteint !</div><div style="font-size:12px;color:var(--mu)">'+o.kf.toLocaleString('fr')+' km parcourus</div></div></div>';
+  } else {
+    h+='<div class="row" style="margin-bottom:'+(o.dCap?'14px':'0')+'">';
+    h+='<div style="background:rgba(0,188,212,.1);border:1px solid rgba(0,188,212,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:900;color:#4DD0E1">'+o.kf.toLocaleString('fr')+'</div><div style="font-size:11px;color:var(--mu)">km parcourus</div></div>';
+    h+='<div style="background:rgba(0,188,212,.1);border:1px solid rgba(0,188,212,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:22px;font-weight:900;color:#4DD0E1">'+o.kfCap.toLocaleString('fr')+'</div><div style="font-size:11px;color:var(--mu)">km restants</div></div>';
+    h+='</div>';
+    if(o.dCap){
+      h+='<div style="font-size:12px;color:var(--mu);margin-bottom:4px">\uD83D\uDCC6 Au rythme actuel, cap atteint le :</div>';
+      h+='<div style="font-size:18px;font-weight:800;color:#4DD0E1">'+fd(o.dCap)+'</div>';
+    } else {
+      h+='<div style="font-size:12px;color:var(--mu);line-height:1.5">Ajoute au moins 2 trajets pour estimer une date (ou renseigne la date de naissance/permis).</div>';
+    }
+  }
   h+='</div>';
   // Planning
   if(o.ks!==null){
