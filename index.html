@@ -121,8 +121,18 @@ function calcO(){
   var ks=sr&&sr>0?Math.ceil(kr/sr):null;
   var kj=jr&&jr>0?(kr/jr).toFixed(1):null;
   var ss=p.sess||[];
+  // Rythme actuel (km/semaine) : base sur la duree REELLE de suivi, de la
+  // date origine du compteur (kmOd, ou a defaut la 1ere lecon enregistree)
+  // jusqu'a aujourd'hui. Avant : on utilisait seulement l'ecart entre la
+  // 1ere et la derniere lecon SAISIE, ce qui sous-estimait la duree
+  // ecoulee (des lors que le suivi a commence avant la 1ere saisie) et
+  // gonflait artificiellement le rythme affiche.
   var ksa=0;
-  if(ss.length>=2){var fd=new Date(ss[0].date||today),ld=new Date(ss[ss.length-1].date||today);var jj=Math.max(1,(ld-fd)/86400000);ksa=Math.round(kf/jj*7);}
+  var debutSuivi=p.kmOd?new Date(p.kmOd):(ss.length?new Date(ss[0].date||today):null);
+  if(debutSuivi&&!isNaN(debutSuivi.getTime())&&debutSuivi<today){
+    var joursEcoules=Math.max(1,Math.round((today-debutSuivi)/86400000));
+    ksa=Math.round(kf/joursEcoules*7);
+  }
   else if(ks){ksa=Math.round(ks*0.6);}
   var dfe=null;
   if(ksa>0){var sn=Math.ceil(kr/ksa);dfe=new Date(today.getTime()+sn*7*86400000);}
@@ -317,7 +327,7 @@ function rH(){
   h+='<div style="display:flex;justify-content:space-between"><div>';
   h+='<div style="font-size:10px;font-weight:700;color:#2196F3;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">\uD83D\uDE97 Kilom\u00E9trage</div>';
   h+='<div style="font-size:24px;font-weight:900;color:#fff">'+((p.kmO||0)+(p.kmC||0)).toLocaleString('fr')+' <span style="font-size:13px;color:var(--mu)">km</span></div>';
-  h+=(p.kmO>0?'<div style="font-size:11px;color:var(--mu);margin-top:2px">Depuis '+p.kmOd+'</div>':'<div style="font-size:11px;color:var(--yl);margin-top:2px">\u2192 D\u00E9finir km origine</div>');
+  h+=(p.kmO>0?'<div style="font-size:11px;color:var(--mu);margin-top:2px">Depuis '+(p.kmOd?fd(new Date(p.kmOd)):'--')+'</div>':'<div style="font-size:11px;color:var(--yl);margin-top:2px">\u2192 D\u00E9finir km origine</div>');
   h+='</div><div style="text-align:right"><div style="font-size:11px;color:var(--mu)">Parcouru</div>';
   h+='<div style="font-size:20px;font-weight:800;color:var(--gn)">+'+(p.kmC||0)+' km</div>';
   h+='<div style="font-size:10px;color:var(--mu)">'+(p.sess?p.sess.length:0)+' le\u00E7ons</div></div></div></div>';
@@ -437,7 +447,7 @@ function rO(){
       h+='<div style="font-size:12px;color:var(--mu);margin-bottom:4px">\uD83D\uDCC6 Au rythme actuel, cap atteint le :</div>';
       h+='<div style="font-size:18px;font-weight:800;color:#4DD0E1">'+fd(o.dCap)+'</div>';
     } else {
-      h+='<div style="font-size:12px;color:var(--mu);line-height:1.5">Ajoute au moins 2 trajets pour estimer une date (ou renseigne la date de naissance/permis).</div>';
+      h+='<div style="font-size:12px;color:var(--mu);line-height:1.5">Renseigne la date origine ci-dessus (ou ajoute un trajet, ou ta date de naissance/permis) pour estimer une date.</div>';
     }
   }
   h+='</div>';
