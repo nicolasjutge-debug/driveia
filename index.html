@@ -102,12 +102,45 @@ function iDB(){return{version:4,ap:'p1',apiKey:'',prov:'groq',profiles:{p1:{id:'
 function lDB(){try{var d=JSON.parse(localStorage.getItem('dai4')||'null');return(d&&d.version>=4)?d:iDB();}catch(e){return iDB();}}
 function sDB(){try{localStorage.setItem('dai4',JSON.stringify(DB));}catch(e){}}
 var DB=lDB();
+normDB();
 function AP(){return DB.profiles[DB.ap];}
 function conds(){return Object.values(DB.profiles).filter(function(p){return p.role==='conducteur';});}
 function accs(){return Object.values(DB.profiles).filter(function(p){return p.role==='accompagnateur';});}
 function pr(p){var v=Object.values(p.skills||{});return v.length?Math.round(v.reduce(function(a,b){return a+b;},0)/v.length):0;}
 function sc(v){return v>70?'var(--gn)':v>40?'var(--yl)':'var(--or)';}
-function glk(){var p=AP(),s=p.sess||[];return s.length?(s[s.length-1].kma||0):(p.kmO||0);}
+// ── KM : la somme des lecons est la source de verite ─────────
+// Les km s'additionnent en virgule flottante (ex. 1519.9999999999998) : on arrondit a 0,01.
+function rnd2(x){return Math.round((+x||0)*100)/100;}
+function fmtKm(x){return(Math.round((+x||0)*10)/10).toLocaleString('fr',{maximumFractionDigits:1});}
+// Km parcourus = somme des km de toutes les lecons (a defaut de lecons : valeur saisie).
+function kmTot(p){
+  var s=p.sess||[];
+  if(!s.length)return rnd2(parseFloat(p.kmC)||0);
+  var t=0;
+  for(var i=0;i<s.length;i++){var k=parseFloat(s[i].kml);if(isNaN(k))return rnd2(parseFloat(p.kmC)||0);t+=k;}
+  return rnd2(t);
+}
+// Compteur actuel = compteur origine + km des lecons. Calcule a chaque fois (jamais un ancien
+// compteur devenu faux apres un changement d'origine, qui donnait une lecon de 12 000 km).
+function glk(){
+  var p=AP(),s=p.sess||[];
+  if(!s.length)return parseFloat(p.kmO)||0;
+  var t=0;
+  for(var i=0;i<s.length;i++){var k=parseFloat(s[i].kml);if(isNaN(k))return s[s.length-1].kma||0;t+=k;}
+  return rnd2((parseFloat(p.kmO)||0)+t);
+}
+// Remet en coherence tri par date, compteurs et km cumules (donnees importees ou anciennes).
+function normDB(){
+  try{
+    Object.values(DB.profiles||{}).forEach(function(p){
+      if(!Array.isArray(p.sess))p.sess=[];
+      if(!p.sess.length)return;
+      for(var i=0;i<p.sess.length;i++){if(isNaN(parseFloat(p.sess[i].kml)))return;}
+      recalcSessKmChain(p);
+    });
+    sDB();
+  }catch(e){}
+}
 
 // ── OBJECTIF CALCUL ──────────────────────────────────────────
 // Rythme actuel (km/semaine) = km ENREGISTRES sur la periode [fin-28 ; fin], bornes
@@ -178,7 +211,7 @@ function ryMsg(o){
 }
 function calcO(){
   var p=AP(),today=new Date(),auj=jourDe(today);
-  var kf=p.kmC||0,ko=p.objKm||3000,kr=Math.max(0,ko-kf),pct=Math.min(100,Math.round(kf/ko*100));
+  var kf=kmTot(p),ko=p.objKm||3000,kr=Math.max(0,ko-kf),pct=Math.min(100,Math.round(kf/ko*100));
   var but=null;
   if(p.ddn){var dn=new Date(p.ddn);but=new Date(dn.getFullYear()+18,dn.getMonth(),dn.getDate());}
   if(p.datePermis){but=new Date(p.datePermis);}
@@ -380,10 +413,10 @@ function rH(){
   h+='<div onclick="go(\'o\')" style="background:linear-gradient(135deg,#0A1020,#0D1628);border:1px solid rgba(33,150,243,.3);border-radius:20px;padding:16px 18px;margin-bottom:14px;cursor:pointer">';
   h+='<div style="display:flex;justify-content:space-between"><div>';
   h+='<div style="font-size:10px;font-weight:700;color:#2196F3;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">\uD83D\uDE97 Kilom\u00E9trage</div>';
-  h+='<div style="font-size:24px;font-weight:900;color:#fff">'+((p.kmO||0)+(p.kmC||0)).toLocaleString('fr')+' <span style="font-size:13px;color:var(--mu)">km</span></div>';
+  h+='<div style="font-size:24px;font-weight:900;color:#fff">'+fmtKm((p.kmO||0)+kmTot(p))+' <span style="font-size:13px;color:var(--mu)">km</span></div>';
   h+=(p.kmO>0?'<div style="font-size:11px;color:var(--mu);margin-top:2px">Depuis '+(p.kmOd?fd(new Date(p.kmOd)):'--')+'</div>':'<div style="font-size:11px;color:var(--yl);margin-top:2px">\u2192 D\u00E9finir km origine</div>');
   h+='</div><div style="text-align:right"><div style="font-size:11px;color:var(--mu)">Parcouru</div>';
-  h+='<div style="font-size:20px;font-weight:800;color:var(--gn)">+'+(p.kmC||0)+' km</div>';
+  h+='<div style="font-size:20px;font-weight:800;color:var(--gn)">+'+fmtKm(kmTot(p))+' km</div>';
   h+='<div style="font-size:10px;color:var(--mu)">'+(p.sess?p.sess.length:0)+' le\u00E7ons</div></div></div></div>';
   // Week strip
   var weekDates=getWeekDates();
@@ -471,7 +504,8 @@ function rO(){
   h+='<div class="row" style="margin-bottom:12px">';
   h+='<div><div class="lbl">Date de naissance</div><input type="date" id="i-dn" value="'+(p.ddn||'')+'"></div>';
   h+='<div><div class="lbl">Objectif km</div><input type="number" id="i-ok" value="'+(p.objKm||3000)+'"></div></div>';
-  h+='<div class="lbl">Km parcourus a ce jour</div><input type="number" id="i-kc" value="'+(p.kmC||0)+'" style="margin-bottom:12px">';
+  var hasS=!!(p.sess&&p.sess.length);
+  h+='<div class="lbl">Km parcourus a ce jour'+(hasS?' (somme des lecons)':'')+'</div><input type="number" id="i-kc" value="'+kmTot(p)+'"'+(hasS?' readonly style="margin-bottom:12px;opacity:.6"':' style="margin-bottom:12px"')+'>';
   h+='<div class="lbl">Km compteur origine</div><div class="row" style="margin-bottom:6px">';
   h+='<div><input type="number" id="i-ko" value="'+(p.kmO||0)+'" placeholder="ex: 12500"></div>';
   h+='<div><input type="date" id="i-kod" value="'+(p.kmOd||'')+'"></div></div>';
@@ -643,6 +677,7 @@ function saveObjCfg(){
   p.kmC=parseFloat(document.getElementById('i-kc').value||0);
   p.kmO=parseFloat(document.getElementById('i-ko').value||0);
   p.kmOd=document.getElementById('i-kod').value||'';
+  if(p.sess&&p.sess.length)recalcSessKmChain(p);   // km cumules et compteurs alignes sur l'origine saisie
   sDB();toast('Enregistre');rO();
 }
 function genObjPlan(){
@@ -713,13 +748,13 @@ function recalcSessKmChain(p){
   // Sort sessions by date, then rebuild kma (km after) chain from kmO + cumulative kml
   if(!p.sess||!p.sess.length)return;
   p.sess.sort(function(a,b){return new Date(a.date||0)-new Date(b.date||0);});
-  var running=p.kmO||0;
+  var ko=parseFloat(p.kmO)||0,running=ko;
   p.sess.forEach(function(s){
-    running+=parseFloat(s.kml||0);
+    running=rnd2(running+(parseFloat(s.kml)||0));
     s.kma=running;
   });
   var last=p.sess[p.sess.length-1];
-  p.kmC=Math.max(0,(last.kma||0)-p.kmO);
+  p.kmC=Math.max(0,rnd2((last.kma||0)-ko));
 }
 function clearAllSess(){
   if(!confirm('Effacer toutes les sessions ?'))return;
@@ -757,7 +792,7 @@ function doImport(txt){
     if(!data.version)throw new Error('format invalide');
     var key=DB.apiKey,prov=DB.prov;
     DB=data;DB.apiKey=data.apiKey||key;DB.prov=data.prov||prov;
-    sDB();
+    normDB();
     var nb=0;
     Object.values(data.profiles||{}).forEach(function(p){nb+=(p.sess||[]).length;});
     toast('Import OK: '+nb+' lecons');
@@ -790,7 +825,7 @@ function showShareModal(){
   var lines=[];
   lines.push('DriveAI - Progression de '+p.name);
   lines.push('------------------------');
-  lines.push('Km: '+(p.kmC||0).toLocaleString('fr')+' / '+(p.objKm||3000).toLocaleString('fr')+' km ('+(o.pct||0)+'%)');
+  lines.push('Km: '+fmtKm(kmTot(p))+' / '+(p.objKm||3000).toLocaleString('fr')+' km ('+(o.pct||0)+'%)');
   if(o.but){
     lines.push('18 ans le: '+fd(o.but));
     lines.push('Jours restants: '+(o.jr||0));
@@ -1029,7 +1064,7 @@ function renderSkillsList(cs){
     card.style.cssText='background:var(--sf);border:1px solid var(--bd);border-radius:18px;padding:16px;margin-bottom:12px';
     var hdr=document.createElement('div');
     hdr.style.cssText='display:flex;align-items:center;gap:12px;margin-bottom:14px';
-    hdr.innerHTML='<div class="av" style="background:'+p.color+'">'+p.ini+'</div><div style="flex:1"><div style="font-size:15px;font-weight:700;color:#fff">'+p.name+'</div><div style="font-size:11px;color:var(--mu)">'+(p.sess?p.sess.length:0)+' lecons \u00B7 '+(p.kmC||0)+' km</div></div><div style="font-size:22px;font-weight:900;color:var(--yl)">'+prg+'%</div>';
+    hdr.innerHTML='<div class="av" style="background:'+p.color+'">'+p.ini+'</div><div style="flex:1"><div style="font-size:15px;font-weight:700;color:#fff">'+p.name+'</div><div style="font-size:11px;color:var(--mu)">'+(p.sess?p.sess.length:0)+' lecons \u00B7 '+fmtKm(kmTot(p))+' km</div></div><div style="font-size:22px;font-weight:900;color:var(--yl)">'+prg+'%</div>';
     card.appendChild(hdr);
     Object.keys(sk).forEach(function(k){
       var v=sk[k];
@@ -1244,6 +1279,7 @@ function updDelta(){
   var delta=document.getElementById('l-delta');
   var last=glk(),p=AP();
   if(val>0&&last>0&&val>last){delta.textContent='+'+(val-last).toFixed(1)+' km - Precedent: '+last.toLocaleString('fr')+' km';delta.style.color='var(--gn)';}
+  else if(val>0&&last>0&&val<last){delta.textContent='Inferieur au compteur precedent ('+fmtKm(last)+') : lecon passee = ajout manuel';delta.style.color='var(--or)';}
   else if(val>0&&p.kmO>0){delta.textContent='+'+(val-p.kmO).toFixed(1)+' km depuis le depart';delta.style.color='var(--yl)';}
   else{delta.textContent='';}
 }
@@ -1251,13 +1287,14 @@ function saveLecon(){
   var km=parseFloat(document.getElementById('l-km').value||0);
   if(!km||km<=0){toast('Saisis le km compteur');return;}
   var p=AP(),last=glk();
+  if(km<last){toast('Compteur inferieur au precedent ('+fmtKm(last)+')');return;}
+  var kml=rnd2(km-last);
+  if(kml>300&&!confirm('Cette lecon ferait '+fmtKm(kml)+' km. Verifie le compteur et le km origine. Enregistrer quand meme ?'))return;
   var types=Array.prototype.map.call(document.querySelectorAll('#l-chips .chip.on'),function(c){return c.textContent;});
-  var sess={kma:km,kml:Math.max(0,km-last),date:document.getElementById('l-date').value||'',dur:document.getElementById('l-dur').value||'',note:document.getElementById('l-note').value||'',types:types,accId:document.getElementById('l-acc').value||''};
+  var sess={kma:km,kml:kml,date:document.getElementById('l-date').value||'',dur:document.getElementById('l-dur').value||'',note:document.getElementById('l-note').value||'',types:types,accId:document.getElementById('l-acc').value||''};
   if(!p.sess)p.sess=[];
   p.sess.push(sess);
-  p.sess.sort(function(a,b){return new Date(a.date||0)-new Date(b.date||0);});
-  var lastChrono=p.sess[p.sess.length-1];
-  p.kmC=Math.max(0,(lastChrono.kma||0)-p.kmO);
+  recalcSessKmChain(p);   // tri par date, compteurs et km cumules coherents
   sDB();toast('Lecon +'+sess.kml.toFixed(1)+' km');
   renderLeconHist();rH();rO();
 }
