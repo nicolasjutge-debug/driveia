@@ -110,8 +110,65 @@ function sc(v){return v>70?'var(--gn)':v>40?'var(--yl)':'var(--or)';}
 function glk(){var p=AP(),s=p.sess||[];return s.length?(s[s.length-1].kma||0):(p.kmO||0);}
 
 // ── OBJECTIF CALCUL ──────────────────────────────────────────
+// Rythme actuel (km/semaine) = km ENREGISTRES sur les 28 derniers jours, divises par
+// le nombre de semaines correspondant. Si le suivi a moins de 28 jours, on prend la
+// periode depuis son debut (7 jours minimum, pour ne pas gonfler le rythme apres
+// 1 ou 2 trajets). Rien n'est invente : sans assez de trajets dates, ok=false et
+// aucune date n'est estimee.
+// Avant : km totaux / jours ecoules (ou 60% du rythme requis faute de donnees), ce
+// qui donnait un rythme faux, fige et independant des trajets recents.
+var JOUR_MS=86400000,RYTHME_FENETRE=28;
+function jourDe(d){return Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/JOUR_MS);}
+function jourStr(s){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||'');return m?Math.floor(Date.UTC(+m[1],+m[2]-1,+m[3])/JOUR_MS):null;}
+function dateDeJour(n){var t=new Date(n*JOUR_MS);return new Date(t.getUTCFullYear(),t.getUTCMonth(),t.getUTCDate());}
+function calcRythme(p,auj){
+  var ss=[];
+  (p.sess||[]).forEach(function(s){
+    var j=jourStr(s.date),k=parseFloat(s.kml);
+    if(j!==null&&k>0&&j<=auj)ss.push({j:j,k:k});   // trajets sans date, sans km ou dates dans le futur : ignores
+  });
+  ss.sort(function(a,b){return a.j-b.j;});
+  var od=jourStr(p.kmOd);
+  var r={ok:false,rate:0,ksa:0,km:0,jours:0,fenetre:false};
+  if(!ss.length||(ss.length<2&&od===null))return r;
+  var debut=(od!==null&&od<=ss[0].j)?od:ss[0].j;      // debut du suivi
+  // Aujourd'hui ne compte que si un trajet y est deja saisi : une journee en cours
+  // sans trajet n'est pas une journee "a 0 km" (sinon le rythme oscille selon l'heure).
+  var fin=ss[ss.length-1].j===auj?auj:auj-1;
+  var ws=Math.max(fin-(RYTHME_FENETRE-1),debut);       // debut de la periode mesuree
+  var km=0;
+  ss.forEach(function(s,i){
+    if(i===0&&debut<s.j){
+      // 1re saisie = km cumules depuis le compteur origine : repartis sur [debut, s.j]
+      var lo=Math.max(debut,ws);
+      if(s.j>=lo)km+=s.k*(s.j-lo+1)/(s.j-debut+1);
+    } else if(s.j>=ws){km+=s.k;}
+  });
+  var jours=Math.max(7,fin-ws+1);
+  r.ok=true;r.km=km;r.jours=jours;r.fenetre=(fin-ws+1)>=RYTHME_FENETRE;
+  r.rate=km/(jours/7);
+  r.ksa=r.rate>0?Math.max(1,Math.round(r.rate)):0;
+  return r;
+}
+// Date a laquelle il restera 0 km, au rythme reel (km/sem). Calcul au JOUR pres
+// (avant : arrondi a la semaine superieure avec un rythme deja arrondi).
+function dateAtteinte(reste,rate,auj){
+  if(!(reste>0)||!(rate>0))return null;
+  var j=Math.ceil(reste/(rate/7));
+  return j>3650?null:dateDeJour(auj+j);
+}
+function ryBase(r){
+  if(!r||!r.ok)return'';
+  return Math.round(r.km).toLocaleString('fr')+' km sur '+(r.fenetre?'les 4 derni\u00E8res semaines':r.jours+' jours');
+}
+function ryMsg(o){
+  var r=o.ry;
+  if(!r.ok)return'Ajoute au moins 2 trajets dat\u00E9s (1 suffit si la date d\u2019origine du compteur est renseign\u00E9e) pour calculer ton rythme r\u00E9el.';
+  if(!(r.rate>0))return'Aucun trajet enregistr\u00E9 '+(r.fenetre?'sur les 4 derni\u00E8res semaines':'depuis le d\u00E9but du suivi')+' : impossible d\u2019estimer une date.';
+  return'Rythme actuel trop faible ('+r.ksa+' km/sem) pour estimer une date.';
+}
 function calcO(){
-  var p=AP(),today=new Date();
+  var p=AP(),today=new Date(),auj=jourDe(today);
   var kf=p.kmC||0,ko=p.objKm||3000,kr=Math.max(0,ko-kf),pct=Math.min(100,Math.round(kf/ko*100));
   var but=null;
   if(p.ddn){var dn=new Date(p.ddn);but=new Date(dn.getFullYear()+18,dn.getMonth(),dn.getDate());}
@@ -120,26 +177,14 @@ function calcO(){
   var sr=jr?Math.ceil(jr/7):null;
   var ks=sr&&sr>0?Math.ceil(kr/sr):null;
   var kj=jr&&jr>0?(kr/jr).toFixed(1):null;
-  var ss=p.sess||[];
-  // Rythme actuel (km/semaine) : base sur la duree REELLE de suivi, de la
-  // date origine du compteur (kmOd, ou a defaut la 1ere lecon enregistree)
-  // jusqu'a aujourd'hui. Avant : on utilisait seulement l'ecart entre la
-  // 1ere et la derniere lecon SAISIE, ce qui sous-estimait la duree
-  // ecoulee (des lors que le suivi a commence avant la 1ere saisie) et
-  // gonflait artificiellement le rythme affiche.
-  var ksa=0;
-  var debutSuivi=p.kmOd?new Date(p.kmOd):(ss.length?new Date(ss[0].date||today):null);
-  if(debutSuivi&&!isNaN(debutSuivi.getTime())&&debutSuivi<today){
-    var joursEcoules=Math.max(1,Math.round((today-debutSuivi)/86400000));
-    ksa=Math.round(kf/joursEcoules*7);
-  }
-  else if(ks){ksa=Math.round(ks*0.6);}
-  var dfe=null;
-  if(ksa>0){var sn=Math.ceil(kr/ksa);dfe=new Date(today.getTime()+sn*7*86400000);}
+  var ry=calcRythme(p,auj);
+  var ksa=ry.ksa;
+  var objAtteint=kf>=ko;
+  var dfe=objAtteint?null:dateAtteinte(kr,ry.rate,auj);
   // Cap intermediaire 1500 km (distinct de l'objectif final, evolue avec le rythme actuel)
-  var CAP=1500,capAtteint=kf>=CAP,kfCap=Math.max(0,CAP-kf),dCap=null;
-  if(!capAtteint&&ksa>0){var snCap=Math.ceil(kfCap/ksa);dCap=new Date(today.getTime()+snCap*7*86400000);}
-  return{kf:kf,ko:ko,kr:kr,pct:pct,but:but,jr:jr,sr:sr,ks:ks,kj:kj,ksa:ksa,retard:ks&&ks>120,urgent:jr&&jr<90,dfe:dfe,cap:CAP,capAtteint:capAtteint,kfCap:kfCap,dCap:dCap};
+  var CAP=1500,capAtteint=kf>=CAP,kfCap=Math.max(0,CAP-kf);
+  var dCap=capAtteint?null:dateAtteinte(kfCap,ry.rate,auj);
+  return{kf:kf,ko:ko,kr:kr,pct:pct,but:but,jr:jr,sr:sr,ks:ks,kj:kj,ksa:ksa,ry:ry,retard:ks&&ks>120,urgent:jr&&jr<90,objAtteint:objAtteint,dfe:dfe,cap:CAP,capAtteint:capAtteint,kfCap:kfCap,dCap:dCap};
 }
 function fd(d){if(!d)return'--';return d.toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});}
 
@@ -418,9 +463,10 @@ function rO(){
   h+='<div><div class="lbl">Date de naissance</div><input type="date" id="i-dn" value="'+(p.ddn||'')+'"></div>';
   h+='<div><div class="lbl">Objectif km</div><input type="number" id="i-ok" value="'+(p.objKm||3000)+'"></div></div>';
   h+='<div class="lbl">Km parcourus a ce jour</div><input type="number" id="i-kc" value="'+(p.kmC||0)+'" style="margin-bottom:12px">';
-  h+='<div class="lbl">Km compteur origine</div><div class="row" style="margin-bottom:12px">';
+  h+='<div class="lbl">Km compteur origine</div><div class="row" style="margin-bottom:6px">';
   h+='<div><input type="number" id="i-ko" value="'+(p.kmO||0)+'" placeholder="ex: 12500"></div>';
   h+='<div><input type="date" id="i-kod" value="'+(p.kmOd||'')+'"></div></div>';
+  h+='<div style="font-size:11px;color:var(--mu);line-height:1.5;margin-bottom:12px">La date d\u2019origine marque le d\u00E9but du suivi : elle sert \u00E0 calculer ton rythme r\u00E9el.</div>';
   h+='<button class="btn by" id="save-obj-btn" style="padding:12px;font-size:13px">\uD83D\uDCBE Enregistrer</button></div>';
   // Ring
   h+='<div style="background:linear-gradient(135deg,#1A0A28,#120A1E);border:1px solid rgba(156,39,176,.4);border-radius:22px;padding:24px;margin-bottom:16px;text-align:center">';
@@ -446,8 +492,9 @@ function rO(){
     if(o.dCap){
       h+='<div style="font-size:12px;color:var(--mu);margin-bottom:4px">\uD83D\uDCC6 Au rythme actuel, cap atteint le :</div>';
       h+='<div style="font-size:18px;font-weight:800;color:#4DD0E1">'+fd(o.dCap)+'</div>';
+      h+='<div style="font-size:11px;color:var(--mu);margin-top:6px;line-height:1.5">Rythme actuel : '+o.ksa+' km/sem \u2022 '+ryBase(o.ry)+'</div>';
     } else {
-      h+='<div style="font-size:12px;color:var(--mu);line-height:1.5">Renseigne la date origine ci-dessus (ou ajoute un trajet, ou ta date de naissance/permis) pour estimer une date.</div>';
+      h+='<div style="font-size:12px;color:var(--mu);line-height:1.5">'+ryMsg(o)+'</div>';
     }
   }
   h+='</div>';
@@ -460,15 +507,15 @@ function rO(){
     h+='<div style="background:rgba(255,214,0,.1);border:1px solid rgba(255,214,0,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:900;color:var(--yl)">'+o.sr+'</div><div style="font-size:11px;color:var(--mu)">semaines restantes</div></div>';
     h+='</div><div class="row" style="margin-bottom:14px">';
     h+='<div style="background:rgba(33,150,243,.1);border:1px solid rgba(33,150,243,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:900;color:#64B5F6">'+o.kj+'</div><div style="font-size:11px;color:var(--mu)">km/jour requis</div></div>';
-    h+='<div style="background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:900;color:var(--or)">'+o.ksa+'</div><div style="font-size:11px;color:var(--mu)">km/sem actuel</div></div>';
+    h+='<div style="background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.25);border-radius:14px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:900;color:var(--or)">'+(o.ry.ok?o.ksa:'--')+'</div><div style="font-size:11px;color:var(--mu)">km/sem actuel</div><div style="font-size:10px;color:var(--mu);margin-top:2px;line-height:1.4">'+(o.ry.ok?ryBase(o.ry):'trajets insuffisants')+'</div></div>';
     h+='</div>';
-    if(o.retard||o.urgent){
-      h+='<div style="background:rgba('+(o.urgent?'244,67,54':'255,107,0')+',.1);border:1px solid rgba('+(o.urgent?'244,67,54':'255,107,0')+',.3);border-radius:14px;padding:14px;margin-bottom:14px;display:flex;gap:12px">';
-      h+=(o.urgent?'\uD83D\uDEA8':'\u26A0\uFE0F')+'<div><div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">'+(o.urgent?'Objectif en danger !':'Rythme a augmenter')+'</div>';
-      h+='<div style="font-size:12px;color:var(--mu);line-height:1.6">Cible: '+o.ks+' km/sem avec '+o.jr+' jours restants.</div></div></div>';
-    } else {
-      h+='<div style="background:rgba(76,175,80,.1);border:1px solid rgba(76,175,80,.3);border-radius:14px;padding:14px;margin-bottom:14px;display:flex;gap:12px;align-items:center">\u2705<div><div style="font-size:14px;font-weight:700;color:#fff">Rythme bon !</div><div style="font-size:12px;color:var(--mu)">'+o.ks+' km/sem n\u00E9cessaires</div></div></div>';
-    }
+    var bn;
+    if(o.objAtteint)bn={c:'76,175,80',ic:'\uD83C\uDF89',t:'Objectif atteint !',d:o.kf.toLocaleString('fr')+' km parcourus sur '+o.ko.toLocaleString('fr')};
+    else if(o.retard||o.urgent)bn={c:o.urgent?'244,67,54':'255,107,0',ic:o.urgent?'\uD83D\uDEA8':'\u26A0\uFE0F',t:o.urgent?'Objectif en danger !':'Rythme a augmenter',d:'Cible: '+o.ks+' km/sem avec '+o.jr+' jours restants.'+(o.ry.ok?' Rythme actuel : '+o.ksa+' km/sem.':'')};
+    else if(o.ry.ok&&o.ksa<o.ks)bn={c:'255,107,0',ic:'\u26A0\uFE0F',t:'Rythme a augmenter',d:'Cible: '+o.ks+' km/sem \u2022 actuel: '+o.ksa+' km/sem'};
+    else if(o.ry.ok)bn={c:'76,175,80',ic:'\u2705',t:'Rythme bon !',d:o.ksa+' km/sem (cible: '+o.ks+' km/sem)'};
+    else bn={c:'33,150,243',ic:'\uD83C\uDFAF',t:'Rythme \u00E0 suivre',d:o.ks+' km/sem n\u00E9cessaires'};
+    h+='<div style="background:rgba('+bn.c+',.1);border:1px solid rgba('+bn.c+',.3);border-radius:14px;padding:14px;margin-bottom:14px;display:flex;gap:12px;align-items:center">'+bn.ic+'<div><div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:2px">'+bn.t+'</div><div style="font-size:12px;color:var(--mu);line-height:1.6">'+bn.d+'</div></div></div>';
     if(o.dfe){
       h+='<div style="background:rgba(33,150,243,.08);border:1px solid rgba(33,150,243,.2);border-radius:14px;padding:14px;margin-bottom:14px">';
       h+='<div style="font-size:12px;color:var(--mu);margin-bottom:4px">\uD83D\uDCC6 Au rythme actuel, objectif atteint le :</div>';
@@ -476,6 +523,8 @@ function rO(){
       if(o.but && o.dfe>o.but){h+='<div style="font-size:12px;color:var(--rd);margin-top:4px">\u26A0\uFE0F '+Math.round((o.dfe-o.but)/86400000)+' jours APRES les 18 ans</div>';}
       else if(o.but){h+='<div style="font-size:12px;color:var(--gn);margin-top:4px">\u2705 '+Math.round((o.but-o.dfe)/86400000)+' jours avant les 18 ans</div>';}
       h+='</div>';
+    } else if(!o.objAtteint&&(o.capAtteint||o.dCap)){
+      h+='<div style="background:rgba(33,150,243,.08);border:1px solid rgba(33,150,243,.2);border-radius:14px;padding:14px;margin-bottom:14px;font-size:12px;color:var(--mu);line-height:1.5">'+ryMsg(o)+'</div>';
     }
     h+='<button class="btn" id="genobj-btn" style="background:linear-gradient(135deg,#6A1B9A,#8E24AA);color:#fff;margin-top:6px">\uD83E\uDDE0 Generer plan adapte</button>';
     h+='</div>';
@@ -601,14 +650,8 @@ function delSess(pid,idx){
   sDB();toast('Supprime');rO();rH();
 }
 function recalcKmFromSessions(p){
-  // Re-sort by date to ensure chronological coherence, then recalc kmC from last
-  if(p.sess&&p.sess.length){
-    p.sess.sort(function(a,b){return new Date(a.date||0)-new Date(b.date||0);});
-    var last=p.sess[p.sess.length-1];
-    p.kmC=Math.max(0,(last.kma||0)-p.kmO);
-  } else {
-    p.kmC=0;
-  }
+  if(p.sess&&p.sess.length){recalcSessKmChain(p);}
+  else{p.kmC=0;}
 }
 function editSess(pid,idx){
   var p=DB.profiles[pid];
@@ -1207,7 +1250,7 @@ function saveLecon(){
   var lastChrono=p.sess[p.sess.length-1];
   p.kmC=Math.max(0,(lastChrono.kma||0)-p.kmO);
   sDB();toast('Lecon +'+sess.kml.toFixed(1)+' km');
-  renderLeconHist();rH();
+  renderLeconHist();rH();rO();
 }
 function renderLeconHist(){
   var block=document.getElementById('l-hist');if(!block)return;
