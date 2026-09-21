@@ -110,11 +110,14 @@ function sc(v){return v>70?'var(--gn)':v>40?'var(--yl)':'var(--or)';}
 function glk(){var p=AP(),s=p.sess||[];return s.length?(s[s.length-1].kma||0):(p.kmO||0);}
 
 // ── OBJECTIF CALCUL ──────────────────────────────────────────
-// Rythme actuel (km/semaine) = km ENREGISTRES sur les 28 derniers jours, divises par
-// le nombre de semaines correspondant. Si le suivi a moins de 28 jours, on prend la
-// periode depuis son debut (7 jours minimum, pour ne pas gonfler le rythme apres
+// Rythme actuel (km/semaine) = km ENREGISTRES sur la periode [fin-28 ; fin], bornes
+// INCLUSES (29 jours : la lecon du meme jour de la semaine, 4 semaines plus tot, compte),
+// divises par le nombre de semaines de cette periode. Si le suivi est plus recent, on
+// prend la periode depuis son debut (7 jours minimum, pour ne pas gonfler le rythme apres
 // 1 ou 2 trajets). Rien n'est invente : sans assez de trajets dates, ok=false et
 // aucune date n'est estimee.
+// L'affichage donne la base exacte du calcul : km (1 decimale), nombre de lecons comptees
+// et dates de debut/fin incluses (ex. "43,9 km sur 3 lecons du 23/08 au 20/09 inclus").
 // Avant : km totaux / jours ecoules (ou 60% du rythme requis faute de donnees), ce
 // qui donnait un rythme faux, fige et independant des trajets recents.
 var JOUR_MS=86400000,RYTHME_FENETRE=28;
@@ -129,23 +132,24 @@ function calcRythme(p,auj){
   });
   ss.sort(function(a,b){return a.j-b.j;});
   var od=jourStr(p.kmOd);
-  var r={ok:false,rate:0,ksa:0,km:0,jours:0,fenetre:false};
+  var r={ok:false,rate:0,ksa:0,km:0,n:0,ws:0,fin:0,jours:0,fenetre:false};
   if(!ss.length||(ss.length<2&&od===null))return r;
   var debut=(od!==null&&od<=ss[0].j)?od:ss[0].j;      // debut du suivi
   // Aujourd'hui ne compte que si un trajet y est deja saisi : une journee en cours
   // sans trajet n'est pas une journee "a 0 km" (sinon le rythme oscille selon l'heure).
   var fin=ss[ss.length-1].j===auj?auj:auj-1;
-  var ws=Math.max(fin-(RYTHME_FENETRE-1),debut);       // debut de la periode mesuree
-  var km=0;
+  var ws=Math.max(fin-RYTHME_FENETRE,debut);           // debut de la periode mesuree (inclus)
+  var km=0,n=0;
   ss.forEach(function(s,i){
     if(i===0&&debut<s.j){
       // 1re saisie = km cumules depuis le compteur origine : repartis sur [debut, s.j]
       var lo=Math.max(debut,ws);
-      if(s.j>=lo)km+=s.k*(s.j-lo+1)/(s.j-debut+1);
-    } else if(s.j>=ws){km+=s.k;}
+      if(s.j>=lo){km+=s.k*(s.j-lo+1)/(s.j-debut+1);n++;}
+    } else if(s.j>=ws){km+=s.k;n++;}
   });
-  var jours=Math.max(7,fin-ws+1);
-  r.ok=true;r.km=km;r.jours=jours;r.fenetre=(fin-ws+1)>=RYTHME_FENETRE;
+  var nj=fin-ws+1;                                     // jours de la periode, bornes incluses
+  var jours=Math.max(7,nj);
+  r.ok=true;r.km=km;r.n=n;r.ws=ws;r.fin=fin;r.jours=jours;r.fenetre=nj>=RYTHME_FENETRE+1;
   r.rate=km/(jours/7);
   r.ksa=r.rate>0?Math.max(1,Math.round(r.rate)):0;
   return r;
@@ -157,14 +161,19 @@ function dateAtteinte(reste,rate,auj){
   var j=Math.ceil(reste/(rate/7));
   return j>3650?null:dateDeJour(auj+j);
 }
+function pad2(n){return(n<10?'0':'')+n;}
+function fmtJ(n){var d=dateDeJour(n);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1);}
+function fmtKm1(k){return(Math.round(k*10)/10).toLocaleString('fr',{minimumFractionDigits:1,maximumFractionDigits:1});}
+function ryPeriode(r){return'du '+fmtJ(r.ws)+' au '+fmtJ(r.fin)+' inclus';}
 function ryBase(r){
   if(!r||!r.ok)return'';
-  return Math.round(r.km).toLocaleString('fr')+' km sur '+(r.fenetre?'les 4 derni\u00E8res semaines':r.jours+' jours');
+  if(!r.n)return'Aucune le\u00E7on '+ryPeriode(r);
+  return fmtKm1(r.km)+' km sur '+r.n+(r.n>1?' le\u00E7ons ':' le\u00E7on ')+ryPeriode(r);
 }
 function ryMsg(o){
   var r=o.ry;
   if(!r.ok)return'Ajoute au moins 2 trajets dat\u00E9s (1 suffit si la date d\u2019origine du compteur est renseign\u00E9e) pour calculer ton rythme r\u00E9el.';
-  if(!(r.rate>0))return'Aucun trajet enregistr\u00E9 '+(r.fenetre?'sur les 4 derni\u00E8res semaines':'depuis le d\u00E9but du suivi')+' : impossible d\u2019estimer une date.';
+  if(!(r.rate>0))return'Aucune le\u00E7on enregistr\u00E9e '+ryPeriode(r)+' : impossible d\u2019estimer une date.';
   return'Rythme actuel trop faible ('+r.ksa+' km/sem) pour estimer une date.';
 }
 function calcO(){
