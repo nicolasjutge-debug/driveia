@@ -196,6 +196,7 @@ function dateAtteinte(reste,rate,auj){
 }
 function pad2(n){return(n<10?'0':'')+n;}
 function fmtJ(n){var d=dateDeJour(n);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1);}
+function fmtJY(n){var d=dateDeJour(n);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2);}
 function fmtKm1(k){return(Math.round(k*10)/10).toLocaleString('fr',{minimumFractionDigits:1,maximumFractionDigits:1});}
 function ryPeriode(r){return'du '+fmtJ(r.ws)+' au '+fmtJ(r.fin)+' inclus';}
 function ryBase(r){
@@ -1302,8 +1303,11 @@ function renderLeconHist(){
   var block=document.getElementById('l-hist');if(!block)return;
   var s=AP().sess||[];
   if(!s.length){block.innerHTML='';return;}
-  block.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">3 dernieres lecons</div>';
-  s.slice(-3).reverse().forEach(function(sess,ri){
+  var titre=s.length+(s.length>1?' lecons enregistrees':' lecon enregistree');
+  var j0=jourStr(s[0].date);
+  if(j0!==null)titre+=' \u00B7 depuis le '+fmtJY(j0);
+  block.innerHTML='<div style="font-size:12px;font-weight:700;color:var(--mu);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">'+titre+'</div>';
+  s.slice().reverse().forEach(function(sess,ri){
     var idx=s.length-1-ri;
     var div=document.createElement('div');
     div.style.cssText='display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bd)';
